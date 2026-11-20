@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.env
+deploy/.env
+*.log
+__pycache__
+*.pyc
+.DS_Store

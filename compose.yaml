@@ -1,0 +1,72 @@
+name: madar
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: madar
+      POSTGRES_USER: madar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U madar -d madar"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks: [internal]
+
+  panel:
+    build:
+      context: .
+      dockerfile: Dockerfile.panel
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://madar:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}@db:5432/madar
+      AGENT_TOKEN: ${AGENT_TOKEN:?Set AGENT_TOKEN in deploy/.env}
+      SETUP_KEY: ${SETUP_KEY:?Set SETUP_KEY in deploy/.env}
+      PANEL_PUBLIC_URL: ${PANEL_PUBLIC_URL:-http://localhost:3000}
+    ports:
+      - "${PANEL_BIND:-127.0.0.1}:3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 5
+    networks: [internal]
+
+  agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    restart: unless-stopped
+    environment:
+      PANEL_URL: http://panel:3000
+      AGENT_TOKEN: ${AGENT_TOKEN:?Set AGENT_TOKEN in deploy/.env}
+      NODE_ID: ${NODE_ID:-1}
+      HLS_ROOT: /var/lib/madar/hls
+    volumes:
+      - hls_data:/var/lib/madar/hls
+    depends_on:
+      panel:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+volumes:
+  postgres_data:
+  hls_data:
+
+networks:
+  internal:
+    driver: bridge
